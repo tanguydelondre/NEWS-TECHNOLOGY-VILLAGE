@@ -1,0 +1,45 @@
+import React, { useEffect, useState } from "react";
+import { createRoot } from "react-dom/client";
+import { LockKeyhole, Plus, Save, Trash2, Upload, ArrowLeft, LogOut, Package } from "lucide-react";
+import "./styles.css";
+
+const categories = ["Mobilité électrique", "Énergie solaire", "Équipements électriques", "Matériaux de toiture", "Équipements pour la maison", "Équipements professionnels"];
+const blank = { name: "", category: categories[0], price: "", priceType: "fixed", description: "", emoji: "📦", badge: "", stock: 0, imageUrl: "" };
+const money = n => new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 }).format(Number(n || 0)) + " FCFA";
+
+function AdminApp() {
+  const [credentials, setCredentials] = useState(() => sessionStorage.getItem("ntv_admin_auth") || "");
+  const [user, setUser] = useState(""); const [password, setPassword] = useState("");
+  const [products, setProducts] = useState([]); const [form, setForm] = useState(blank); const [editing, setEditing] = useState(null);
+  const [busy, setBusy] = useState(false); const [message, setMessage] = useState(""); const [error, setError] = useState("");
+  const authHeaders = () => ({ Authorization: `Basic ${credentials}` });
+  async function load(auth = credentials) {
+    if (!auth) return;
+    const r = await fetch("/api/admin/products", { headers: { Authorization: `Basic ${auth}` } });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || "Connexion impossible.");
+    setProducts(data); setCredentials(auth); sessionStorage.setItem("ntv_admin_auth", auth); setError("");
+  }
+  useEffect(() => { if (credentials) load().catch(e => { setError(e.message); setCredentials(""); sessionStorage.removeItem("ntv_admin_auth"); }); }, []);
+  async function login(e) { e.preventDefault(); setBusy(true); setError(""); const token = btoa(`${user}:${password}`); try { await load(token); } catch (e) { setError(e.message); } finally { setBusy(false); } }
+  function logout() { sessionStorage.removeItem("ntv_admin_auth"); setCredentials(""); setProducts([]); setPassword(""); setUser(""); }
+  function edit(p) { setEditing(p.id); setForm({ ...blank, ...p, price: p.priceType === "quote" ? "" : p.price }); setMessage(""); setError(""); window.scrollTo({ top: 0, behavior: "smooth" }); }
+  function newProduct() { setEditing(null); setForm(blank); setMessage(""); setError(""); }
+  async function uploadImage(file) {
+    if (!file) return; const body = new FormData(); body.append("image", file); setBusy(true); setError("");
+    try { const r = await fetch("/api/admin/images", { method: "POST", headers: authHeaders(), body }); const data = await r.json(); if (!r.ok) throw new Error(data.error || "Téléversement impossible."); setForm(f => ({ ...f, imageUrl: data.imageUrl })); setMessage("Photo téléchargée. Enregistrez le produit pour confirmer."); }
+    catch (e) { setError(e.message); } finally { setBusy(false); }
+  }
+  async function save(e) {
+    e.preventDefault(); setBusy(true); setError(""); setMessage("");
+    try { const url = editing ? `/api/admin/products/${encodeURIComponent(editing)}` : "/api/admin/products"; const r = await fetch(url, { method: editing ? "PUT" : "POST", headers: { ...authHeaders(), "Content-Type": "application/json" }, body: JSON.stringify(form) }); const data = await r.json(); if (!r.ok) throw new Error(data.error || "Enregistrement impossible."); await load(); setForm(blank); setEditing(null); setMessage("Produit enregistré avec succès."); }
+    catch (e) { setError(e.message); } finally { setBusy(false); }
+  }
+  async function remove(p) { if (!window.confirm(`Supprimer « ${p.name} » ?`)) return; setError(""); try { const r = await fetch(`/api/admin/products/${encodeURIComponent(p.id)}`, { method: "DELETE", headers: authHeaders() }); const data = await r.json(); if (!r.ok) throw new Error(data.error || "Suppression impossible."); setProducts(old => old.filter(x => x.id !== p.id)); if (editing === p.id) newProduct(); setMessage("Produit supprimé."); } catch (e) { setError(e.message); } }
+  if (!credentials) return <div className="admin-page"><div className="admin-login"><div className="admin-logo"><LockKeyhole size={26}/></div><p className="section-kicker">ESPACE PRIVÉ</p><h1>Administration</h1><p className="admin-sub">NEWS TECHNOLOGY VILLAGE</p><form onSubmit={login}><label>Identifiant<input value={user} onChange={e => setUser(e.target.value)} autoComplete="username" required /></label><label>Mot de passe<input type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" required /></label>{error && <p className="admin-error">{error}</p>}<button className="primary-button full-button" disabled={busy}><LockKeyhole size={17}/>{busy ? "Connexion..." : "Se connecter"}</button></form><a className="admin-back" href="/">← Retour à la boutique</a></div></div>;
+  return <div className="admin-page"><header className="admin-top"><a className="admin-back" href="/"><ArrowLeft size={16}/> Voir la boutique</a><div className="admin-brand"><Package size={22}/> NEWS TECHNOLOGY VILLAGE <span>Administration</span></div><button className="admin-logout" onClick={logout}><LogOut size={15}/> Déconnexion</button></header><main className="admin-main"><div className="admin-title"><div><p className="section-kicker">GESTION DU CATALOGUE</p><h1>Vos produits</h1><p>Ajoutez vos photos, modifiez les prix et mettez votre catalogue à jour sans toucher au code.</p></div><button className="primary-button" onClick={newProduct}><Plus size={17}/> Nouveau produit</button></div>
+    <div className="admin-layout"><section className="admin-panel"><h2>{editing ? "Modifier le produit" : "Ajouter un produit"}</h2><form onSubmit={save} className="admin-form"><label>Nom du produit<input required value={form.name} onChange={e => setForm({...form,name:e.target.value})} placeholder="Ex. Panneau solaire 550 W"/></label><label>Catégorie<select value={form.category} onChange={e => setForm({...form,category:e.target.value})}>{categories.map(c => <option key={c}>{c}</option>)}</select></label><label>Type de prix<select value={form.priceType} onChange={e => setForm({...form,priceType:e.target.value})}><option value="fixed">Prix fixe</option><option value="quote">Prix sur devis</option></select></label>{form.priceType === "fixed" && <label>Prix en FCFA<input required type="number" min="0" step="1" value={form.price} onChange={e => setForm({...form,price:e.target.value})} placeholder="Ex. 125000"/></label>}<label>Description<textarea value={form.description} onChange={e => setForm({...form,description:e.target.value})} rows="3" placeholder="Caractéristiques du produit"/></label><div className="admin-two"><label>Stock (facultatif)<input type="number" min="0" value={form.stock} onChange={e => setForm({...form,stock:e.target.value})}/></label><label>Emoji (facultatif)<input value={form.emoji} onChange={e => setForm({...form,emoji:e.target.value})}/></label></div><label>Photo du produit <span className="admin-hint">JPG, PNG, WEBP ou GIF · 6 Mo maximum</span><span className="admin-upload"><Upload size={19}/><b>Choisir une image sur mon appareil</b><input type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={e => uploadImage(e.target.files?.[0])}/></span></label>{form.imageUrl && <div className="admin-preview"><img src={form.imageUrl} alt="Aperçu du produit"/><button type="button" onClick={() => setForm({...form,imageUrl:""})}>Retirer la photo</button></div>}{message && <p className="admin-success">{message}</p>}{error && <p className="admin-error">{error}</p>}<div className="admin-form-actions"><button className="primary-button" disabled={busy}><Save size={16}/>{busy ? "Enregistrement..." : "Enregistrer le produit"}</button><button className="secondary-admin" type="button" onClick={newProduct}>Annuler</button></div></form></section>
+    <section className="admin-panel admin-list-panel"><div className="admin-list-head"><h2>Catalogue ({products.length})</h2><button className="secondary-admin" onClick={() => load().catch(e => setError(e.message))}>Actualiser</button></div>{products.length === 0 ? <p className="admin-empty">Aucun produit trouvé.</p> : <div className="admin-product-list">{products.map(p => <article className="admin-product" key={p.id}><div className="admin-product-image">{p.imageUrl ? <img src={p.imageUrl} alt=""/> : <span>{p.emoji || "📦"}</span>}</div><div className="admin-product-details"><b>{p.name}</b><small>{p.category}</small><strong>{p.priceType === "quote" ? "Prix sur devis" : money(p.price)}</strong></div><div className="admin-product-actions"><button type="button" onClick={() => edit(p)}>Modifier</button><button type="button" className="delete-admin" onClick={() => remove(p)} aria-label={`Supprimer ${p.name}`}><Trash2 size={15}/></button></div></article>)}</div>}</section></div><p className="admin-footnote">Les modifications sont enregistrées dans MongoDB. Les photos sont conservées dans le stockage d'images de la base. Configurez une sauvegarde régulière de la base pour protéger votre catalogue.</p></main></div>;
+}
+
+export default AdminApp;
